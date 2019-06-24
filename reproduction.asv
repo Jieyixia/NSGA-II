@@ -1,0 +1,217 @@
+function Q = reproduction(P, param)
+% P: parent population
+% F: objective function set
+% pc: crossover probability
+% pm: mutation probaility
+% eta_c: parameter needed in real coded crossover
+% eta_m: parameter needed in real coded mutation
+% dim: number of decision variables [optional]
+% chrom_length: the length of chromosome [optional]
+%
+% Q: child population
+    
+    pop_size = param.pop_size;
+    dim = param.dim;
+    encoding = param.encoding;
+    if strcmpi(encoding, 'real') % real coded
+        
+        Q = zeros(pop_size, dim);
+        
+    else % binary coded
+        
+        chrom_length = param.chrom_length;
+        Q = zeros(pop_size, chrom_length * dim);
+        
+    end
+    
+    % fitness assignment
+    [phi, ~] = fast_non_dominated_sort(P, param); 
+    
+    for i = 1 : (pop_size / 2)
+        
+        % binary tournament selection
+        [t1, t2] = binary_tournament_selection(pop_size, phi);
+        p1 = P(t1, :);
+        p2 = P(t2, :);
+
+        % recombination
+        [c1, c2] = crossover(p1, p2, param);
+        
+        % bitwise mutation 
+        c1 = mutation(c1, param);
+        c2 = mutation(c2, param);
+        
+        % add c1 and c2 to child population Q
+        Q(2 * i - 1, :) = c1;
+        Q(2 * i, :) = c2;
+    end
+    
+end
+
+% -----------------------------------------------------------
+function [t1, t2] = binary_tournament_selection(pop_size, phi)
+
+    s1 = ceil(rand * pop_size);
+    s2 = ceil(rand * pop_size);
+    if phi(s1) > phi(s2)
+        t1 = s2;
+    else
+        t1 = s1;
+    end
+
+    s1 = ceil(rand * pop_size);
+    s2 = ceil(rand * pop_size);
+    if phi(s1) > phi(s2)
+        t2 = s2;
+    else
+        t2 = s1;
+    end
+
+end
+
+% -----------------------------------------------------------
+function [c1, c2] = crossover(p1, p2, param)
+    
+    pc = param.pc;
+    encoding = param.encoding;
+    U = param.upper_bound;
+    L = param.lower_bound;
+    if strcmpi(encoding, 'real') % real coded        
+        eta_c = param.eta_c;
+        [c1, c2] = SBX(p1, p2, pc, eta_c, U, L);       
+    else % binary coded
+        [c1, c2] = single_point_crossover(p1, p2, pc);
+    end
+    
+end
+
+% -----------------------------------------------------------
+function [c1, c2] = single_point_crossover(p1, p2, pc)
+% single point crossover for binary coded population
+    
+    if rand > pc
+        c1 = p1;
+        c2 = p2;
+        return
+    end
+    
+    len = length(p1);
+    c_point = round(rand * len);
+    
+    if c_point == 0 || c_point == len
+        c1 = p1;
+        c2 = p2;
+    else
+        c1 = [p1(1 : c_point) p2(c_point + 1 : end)];
+        c2 = [p2(1 : c_point) p1(c_point + 1 : end)];
+    end
+
+end
+
+% -----------------------------------------------------------
+function [c1, c2] = SBX(p1, p2, pc, eta_c, U, L)
+% simulated binary crossover for real coded population
+    
+    if  rand > pc
+        c1 = p1;
+        c2 = p2;
+        return
+    end
+        
+    dim = length(p1); 
+    c1 = zeros(1, dim);
+    c2 = c1;
+    
+    expo = 1 / (eta_c + 1);
+    for i = 1 : dim
+        r = rand;       
+        if r <= 0.5
+            beta = (2 * r)^expo;
+        else
+            beta = (2 - 2 * r)^(-expo);
+        end
+        c1(i) = 0.5 * ((1 - beta) * p1(i) + (1 + beta) * p2(i));
+        c2(i) = 0.5 * ((1 + beta) * p1(i) + (1 - beta) * p2(i));
+        
+        if c1(i) < L(i)
+            c1(i) = L(i);
+        else
+            if c1(i) > U(i)
+                c1(i) = U(i);
+            end
+        end
+        
+        if c2(i) < L(i)
+            c2(i) = L(i);
+        else
+            if c2(i) > U(i)
+                c2(i) = U(i);
+            end
+        end
+        
+    end
+        
+end
+
+% -----------------------------------------------------------
+function c = mutation(c, param)
+
+    pm = param.pm;
+    encoding = param.encoding;
+    
+    if strcmpi(encoding, 'real') % real coded
+        eta_m = param.eta_m;
+        U = param.upper_bound;
+        L = param.lower_bound;
+        c = polynomial_mutation(c, pm, eta_m, U, L);
+    else
+        c = bitwise_mutation(c, pm);
+    end
+end
+
+% -----------------------------------------------------------
+function c = bitwise_mutation(c, pm)
+% bitwise mutation for binary coded population
+
+    len = length(c);
+    for j = 1 : len
+        if rand < pm
+            c(j) = 1 - c(j);
+        end
+    end
+end
+
+% -----------------------------------------------------------
+function c = polynomial_mutation(c, pm, eta_m, U, L)
+% polynomial mutation for real coded population
+
+    dim = length(c);
+    expo = 1 + eta_m;
+    
+    for i = 1 : dim
+        if rand > pm
+            continue
+        end
+        gap = U(i) - L(i);
+        
+        delta_1 = (c(i) - L(i)) / gap;
+        delta_2 = (U(i) - c(i)) / gap;
+        
+        u = rand;
+        
+        if u <= 0.5
+            delta = (2 * u + (1 - 2 * u) * (1 - delta_1)^expo)^(1 / expo) - 1;
+        else
+            delta = 1 - (2 * (1 - u) + 2 * (u - 0.5) * (1 - delta_2)^expo)^(1 / expo);
+        end
+        
+        c(i) = c(i) + delta * gap;
+        if c(i) < L(i)
+            c(i) = L(i);
+        else
+            if c(i) > U(i)
+                c(i) = U(i);
+            end
+        end
+    end
+end
